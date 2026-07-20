@@ -1,103 +1,96 @@
 const CHANNEL_ID = 'UCncQOR50FgXzGUPMVkcGQlg';
 
-export default {
-  async fetch(request) {
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=3600',
-      'Content-Type': 'application/json; charset=utf-8'
-    };
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader(
+    'Cache-Control',
+    's-maxage=600, stale-while-revalidate=3600'
+  );
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders
-      });
-    }
-
-    if (request.method !== 'GET') {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Método não permitido.'
-        }),
-        {
-          status: 405,
-          headers: corsHeaders
-        }
-      );
-    }
-
-    try {
-      const feedUrl =
-        `https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}`;
-
-      const youtubeResponse = await fetch(feedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
-        }
-      });
-
-      if (!youtubeResponse.ok) {
-        throw new Error(
-          `O YouTube respondeu com status ${youtubeResponse.status}.`
-        );
-      }
-
-      const xml = await youtubeResponse.text();
-
-      const videoIdMatch = xml.match(
-        /<yt:videoId>([^<]+)<\/yt:videoId>/
-      );
-
-      const titleMatch = xml.match(
-        /<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/
-      );
-
-      const publishedMatch = xml.match(
-        /<entry>[\s\S]*?<published>([^<]+)<\/published>/
-      );
-
-      if (!videoIdMatch || !videoIdMatch[1]) {
-        throw new Error('Nenhum vídeo foi localizado no feed.');
-      }
-
-      const videoId = videoIdMatch[1].trim();
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          channelId: CHANNEL_ID,
-          videoId,
-          title: decodeXml(titleMatch?.[1] || ''),
-          publishedAt: publishedMatch?.[1] || null,
-          watchUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`
-        }),
-        {
-          status: 200,
-          headers: corsHeaders
-        }
-      );
-    } catch (error) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Não foi possível consultar o YouTube.'
-        }),
-        {
-          status: 500,
-          headers: corsHeaders
-        }
-      );
-    }
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
   }
-};
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({
+      success: false,
+      error: 'Método não permitido.'
+    });
+  }
+
+  try {
+    const feedUrl =
+      'https://www.youtube.com/feeds/videos.xml?channel_id=' +
+      CHANNEL_ID;
+
+    const youtubeResponse = await fetch(feedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0'
+      }
+    });
+
+    if (!youtubeResponse.ok) {
+      throw new Error(
+        'O YouTube respondeu com status ' + youtubeResponse.status
+      );
+    }
+
+    const xml = await youtubeResponse.text();
+
+    const videoIdMatch = xml.match(
+      /<yt:videoId>([^<]+)<\/yt:videoId>/
+    );
+
+    const entryMatch = xml.match(
+      /<entry>([\s\S]*?)<\/entry>/
+    );
+
+    if (!videoIdMatch || !videoIdMatch[1]) {
+      throw new Error('Nenhum vídeo foi localizado no feed.');
+    }
+
+    const videoId = videoIdMatch[1].trim();
+    const entryXml = entryMatch ? entryMatch[1] : '';
+
+    const titleMatch = entryXml.match(
+      /<title>([\s\S]*?)<\/title>/
+    );
+
+    const publishedMatch = entryXml.match(
+      /<published>([^<]+)<\/published>/
+    );
+
+    const title = decodeXml(
+      titleMatch ? titleMatch[1].trim() : ''
+    );
+
+    return res.status(200).json({
+      success: true,
+      channelId: CHANNEL_ID,
+      videoId: videoId,
+      title: title,
+      publishedAt: publishedMatch
+        ? publishedMatch[1].trim()
+        : null,
+      watchUrl:
+        'https://www.youtube.com/watch?v=' + videoId,
+      embedUrl:
+        'https://www.youtube-nocookie.com/embed/' + videoId
+    });
+  } catch (error) {
+    console.error('Erro ao consultar o YouTube:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível consultar o YouTube.'
+    });
+  }
+}
 
 function decodeXml(value) {
   return value
@@ -105,6 +98,7 @@ function decodeXml(value) {
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
 }
